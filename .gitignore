@@ -1,2 +1,115 @@
+# Project-specific docs and local configuration
 Question.pdf
 Planning Docs/
+Arena's workspace/
+.config/
+
+# Python compiled files & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+Backend/.venv/
+
+# Python packaging & distribution
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing, linting & code coverage
+.pytest_cache/
+Backend/.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+.tox/
+.nox/
+
+# Node.js & Frontend dependencies/builds
+node_modules/
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+.next/
+out/
+.vercel/
+*.tsbuildinfo
+
+# E2E & test artifacts
+Frontend/e2e/screens/
+e2e/screens/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Environment files & secrets
+.env
+.env.*
+.env*.local
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.crt
+*.cert
+
+# Database files & SQLite logs
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# User uploads & static assets
+uploads/
+Backend/uploads/
+
+# Logs & temp files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+*.temp
+
+# Operating system files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDE & editor configurations
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
