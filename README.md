@@ -71,29 +71,94 @@ A full-stack, real-time messaging web application that faithfully mirrors the UI
 
 ## Architecture
 
+### High-Level System Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client["🖥️ Next.js 14 Frontend (TypeScript + React)"]
+        direction TB
+        UI["App Shell & UI Components<br/><i>(ChatPane, Sidebar, Modals, MessageBubble)</i>"]
+        Stores["Zustand Global Stores<br/><i>(auth, conversations, messages, presence, ui)</i>"]
+        WSClient["WebSocket Client<br/><i>(lib/ws.ts • Auto-Reconnect & Heartbeats)</i>"]
+        HttpClient["HTTP Client<br/><i>(lib/api.ts • Typed Fetch Wrappers)</i>"]
+        
+        UI --> Stores
+        Stores <--> WSClient
+        Stores <--> HttpClient
+    end
+
+    subgraph Network["🌐 Communication Protocols"]
+        direction TB
+        WSTransport["⚡ WebSocket (ws:// • wss://)<br/>Full-Duplex Real-Time Event Stream"]
+        RESTTransport["📡 REST API (http:// • https://)<br/>Stateless JSON CRUD & Media Uploads"]
+    end
+
+    subgraph Backend["⚙️ FastAPI Backend (Python 3.11+ / SQLAlchemy 2.0)"]
+        direction TB
+        subgraph Gateway["API & Transport Gateway"]
+            WSRouter["WebSocket Manager & Handlers<br/><i>(/ws?token=JWT • In-Memory Registry)</i>"]
+            RESTRouter["FastAPI REST Routers<br/><i>(/api/v1/auth, /conversations, /groups, etc.)</i>"]
+        end
+
+        subgraph Services["Core Service Layer"]
+            direction TB
+            AuthService["Auth & Security Service<br/><i>(JWT Verification, Mock OTP, Hydration)</i>"]
+            MsgService["Message & Conversation Service<br/><i>(Idempotent Send, Ordering, History)</i>"]
+            ReceiptService["Receipt & Presence Service<br/><i>(Delivery/Read Ticks, Online Heartbeats)</i>"]
+            SweeperTask["Background Sweeper Task<br/><i>(Asyncio Disappearing Message Janitor)</i>"]
+        end
+
+        subgraph Storage["Persistence & Storage Layer"]
+            direction TB
+            ORM["SQLAlchemy 2.0 ORM<br/><i>(Declarative Mapped Columns)</i>"]
+            DB[("SQLite Database<br/><i>WAL Mode • PRAGMA Foreign Keys</i>")]
+            DiskStorage[("Local Disk Storage<br/><i>uploads/ Avatars & Attachments</i>")]
+        end
+
+        WSRouter --> Services
+        RESTRouter --> Services
+        Services --> ORM
+        Services --> DiskStorage
+        ORM --> DB
+        SweeperTask -.-> DB
+    end
+
+    WSClient <=====>|"ws.send() / events"| WSTransport <=====>|"Dispatched WS Events"| WSRouter
+    HttpClient <=====>|"Authorization: Bearer JWT"| RESTTransport <=====>|"HTTP Request / Response"| RESTRouter
 ```
-┌──────────────────────────┐         WebSocket (ws://)         ┌─────────────────────────┐
-│                          │  ◄──────────────────────────────►  │                         │
-│   Next.js Frontend       │         REST (http://)            │   FastAPI Backend        │
-│   (TypeScript + React)   │  ◄──────────────────────────────► │   (Python + SQLAlchemy)  │
-│                          │                                    │                         │
-│  ┌────────┐ ┌──────────┐ │                                    │  ┌──────┐  ┌──────────┐ │
-│  │ Zustand │ │ lib/ws.ts│ │                                    │  │ REST │  │ WS       │ │
-│  │ Stores  │ │ Socket   │ │                                    │  │Routes│  │ Handlers │ │
-│  └────────┘ └──────────┘ │                                    │  └──┬───┘  └────┬─────┘ │
-│                          │                                    │     │           │       │
-└──────────────────────────┘                                    │  ┌──▼───────────▼─────┐ │
-                                                                │  │   Service Layer     │ │
-                                                                │  │ (auth, message,     │ │
-                                                                │  │  group, receipt,     │ │
-                                                                │  │  presence, settings) │ │
-                                                                │  └──────────┬──────────┘ │
-                                                                │             │            │
-                                                                │  ┌──────────▼──────────┐ │
-                                                                │  │   SQLite (WAL mode)  │ │
-                                                                │  │   via SQLAlchemy ORM │ │
-                                                                │  └─────────────────────┘ │
-                                                                └─────────────────────────┘
+
+### Real-Time Event & Optimistic UI Lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Alice as 👤 Alice (Client A)
+    participant WS as ⚡ WebSocket Gateway
+    participant Backend as ⚙️ Service & DB
+    actor Bob as 👤 Bob (Client B)
+
+    Note over Alice,Bob: Phase 1: Optimistic UI & Message Dispatch
+    Alice->>Alice: Append bubble optimistically (status: sending 🕒)
+    Alice->>>WS: ws.send("message.send", {conversation_id, client_id, body})
+    WS->>>Backend: Deduplicate by (sender_id, client_id) & persist to DB
+    Backend-->>>WS: Message created with sequential ID
+    WS-->>>Alice: Emit "message.ack" {client_id, message}
+    Alice->>Alice: Reconcile placeholder (status: sent ✓)
+
+    Note over WS,Bob: Phase 2: Live Fanout & Delivery Receipt
+    WS-->>>Bob: Broadcast "message.new" {message}
+    Bob->>Bob: Render bubble & trigger unread notification badge
+    Bob->>>WS: ws.send("message.delivered", {message_ids: [id]})
+    WS->>>Backend: Update delivered_at in message_receipts
+    WS-->>>Alice: Broadcast "receipt.update" {status: delivered ✓✓}
+    Alice->>Alice: Upgrade tick indicator to delivered
+
+    Note over Alice,Bob: Phase 3: Read Receipt
+    Bob->>Bob: Opens active conversation view
+    Bob->>>WS: ws.send("message.read", {conversation_id, up_to_message_id})
+    WS->>>Backend: Record read_at timestamp
+    WS-->>>Alice: Broadcast "receipt.update" {status: read (blue ✓✓)}
+    Alice->>Alice: Upgrade tick indicator to read
 ```
 
 **Key design decisions:**
@@ -106,55 +171,136 @@ A full-stack, real-time messaging web application that faithfully mirrors the UI
 
 ## Database Schema
 
-```
-┌───────────────────┐       ┌─────────────────────────┐       ┌───────────────────────┐
-│      users        │       │     conversations        │       │      messages          │
-├───────────────────┤       ├─────────────────────────┤       ├───────────────────────┤
-│ id           PK   │       │ id                PK    │       │ id               PK   │
-│ phone_number UQ   │       │ type (direct|group)     │       │ conversation_id  FK   │
-│ username     UQ   │       │ direct_key        UQ    │       │ sender_id        FK   │
-│ display_name      │       │ name                    │       │ client_id        UQ*  │
-│ about             │       │ description             │       │ kind (text|attach|sys)│
-│ avatar_url        │       │ avatar_url / color      │       │ body                  │
-│ avatar_color      │       │ created_by        FK    │       │ reply_to_id      FK   │
-│ last_seen_at      │       │ disappearing_secs       │       │ system_event          │
-│ created_at        │       │ members_can_add         │       │ expires_at            │
-└──────┬────────────┘       │ only_admins_can_send    │       │ deleted_at            │
-       │                    │ last_message_id / _at   │       │ created_at            │
-       │                    │ created_at              │       └───────┬───────────────┘
-       │                    └──────────┬──────────────┘               │
-       │                               │                              │
-┌──────▼────────────┐       ┌──────────▼──────────────┐       ┌───────▼───────────────┐
-│  user_settings    │       │ conversation_members    │       │  message_receipts     │
-├───────────────────┤       ├─────────────────────────┤       ├───────────────────────┤
-│ user_id      PK,FK│       │ id               PK    │       │ message_id    PK,FK   │
-│ read_receipts     │       │ conversation_id  FK    │       │ user_id       PK,FK   │
-│ typing_indicators │       │ user_id          FK    │       │ delivered_at          │
-│ show_last_seen    │       │ role (admin|member)    │       │ read_at               │
-│ theme             │       │ joined_at              │       └───────────────────────┘
-│ notification_cont.│       │ left_at (soft remove)  │
-│ default_disappear.│       │ last_read_message_id   │       ┌───────────────────────┐
-└───────────────────┘       │ pinned / muted / arch. │       │     reactions         │
-                            └─────────────────────────┘       ├───────────────────────┤
-┌───────────────────┐                                         │ message_id    PK,FK   │
-│    contacts       │       ┌─────────────────────────┐       │ user_id       PK,FK   │
-├───────────────────┤       │     attachments         │       │ emoji                 │
-│ id           PK   │       ├─────────────────────────┤       │ created_at            │
-│ owner_id     FK   │       │ id               PK    │       └───────────────────────┘
-│ user_id      FK   │       │ message_id       FK    │
-│ nickname          │       │ file_name              │       ┌───────────────────────┐
-│ blocked           │       │ mime_type              │       │  message_deletions    │
-│ created_at        │       │ size_bytes             │       ├───────────────────────┤
-└───────────────────┘       │ storage_path           │       │ message_id    PK,FK   │
-                            └─────────────────────────┘       │ user_id       PK,FK   │
-┌───────────────────┐                                         │ deleted_at            │
-│    otp_codes      │                                         └───────────────────────┘
-├───────────────────┤
-│ id           PK   │
-│ identifier        │
-│ code / expires_at │
-│ consumed          │
-└───────────────────┘
+```mermaid
+erDiagram
+    USERS ||--o| USER_SETTINGS : "configures"
+    USERS ||--o{ CONTACTS : "owns"
+    USERS ||--o{ CONVERSATION_MEMBERS : "participates"
+    USERS ||--o{ MESSAGES : "sends"
+    USERS ||--o{ MESSAGE_RECEIPTS : "receives"
+    USERS ||--o{ REACTIONS : "reacts"
+    USERS ||--o{ MESSAGE_DELETIONS : "deletes"
+
+    CONVERSATIONS ||--o{ CONVERSATION_MEMBERS : "contains"
+    CONVERSATIONS ||--o{ MESSAGES : "holds"
+
+    MESSAGES ||--o{ MESSAGE_RECEIPTS : "tracks"
+    MESSAGES ||--o{ REACTIONS : "has"
+    MESSAGES ||--o{ ATTACHMENTS : "includes"
+    MESSAGES ||--o{ MESSAGE_DELETIONS : "records"
+    MESSAGES ||--o| MESSAGES : "replies to"
+
+    USERS {
+        int id PK
+        string phone_number UK
+        string username UK
+        string display_name
+        string about
+        string avatar_url
+        string avatar_color
+        datetime last_seen_at
+        datetime created_at
+    }
+
+    USER_SETTINGS {
+        int user_id PK "FK to users"
+        boolean read_receipts
+        boolean typing_indicators
+        boolean show_last_seen
+        string theme
+        string notification_content
+        int default_disappearing_secs
+    }
+
+    CONVERSATIONS {
+        int id PK
+        string type "direct | group"
+        string direct_key UK
+        string name
+        string description
+        string avatar_url
+        string avatar_color
+        int created_by FK
+        int disappearing_secs
+        boolean members_can_add
+        boolean only_admins_can_send
+        int last_message_id
+        datetime last_message_at
+        datetime created_at
+    }
+
+    CONVERSATION_MEMBERS {
+        int id PK
+        int conversation_id FK
+        int user_id FK
+        string role "admin | member"
+        datetime joined_at
+        datetime left_at
+        int last_read_message_id
+        boolean is_pinned
+        boolean is_muted
+        boolean is_archived
+    }
+
+    MESSAGES {
+        int id PK
+        int conversation_id FK
+        int sender_id FK
+        string client_id UK
+        string kind "text | attachment | system"
+        string body
+        int reply_to_id FK
+        string system_event
+        datetime expires_at
+        datetime deleted_at
+        datetime created_at
+    }
+
+    MESSAGE_RECEIPTS {
+        int message_id PK "FK to messages"
+        int user_id PK "FK to users"
+        datetime delivered_at
+        datetime read_at
+    }
+
+    REACTIONS {
+        int message_id PK "FK to messages"
+        int user_id PK "FK to users"
+        string emoji
+        datetime created_at
+    }
+
+    ATTACHMENTS {
+        int id PK
+        int message_id FK
+        string file_name
+        string mime_type
+        int size_bytes
+        string storage_path
+    }
+
+    MESSAGE_DELETIONS {
+        int message_id PK "FK to messages"
+        int user_id PK "FK to users"
+        datetime deleted_at
+    }
+
+    CONTACTS {
+        int id PK
+        int owner_id FK
+        int user_id FK
+        string nickname
+        boolean blocked
+        datetime created_at
+    }
+
+    OTP_CODES {
+        int id PK
+        string identifier
+        string code
+        datetime expires_at
+        boolean consumed
+    }
 ```
 
 **Key indexes:** `ix_conversations_last_message_at` (chat list ordering), `ix_messages_conversation_id_id` (cursor pagination), `ix_messages_expires_at` (disappearing sweeper), `ix_members_user_archived_pinned` (my chat list lookup), `uq_messages_sender_client` (idempotent send).
