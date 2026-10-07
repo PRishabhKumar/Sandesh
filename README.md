@@ -1,6 +1,6 @@
 # Sandesh — Signal-Inspired Full Stack Messaging App
 
-A full-stack, real-time messaging web application that faithfully mirrors the UI/UX of **Signal Desktop**. Built as an SDE Fullstack assignment, Sandesh delivers real-time 1:1 and group chats, delivery/read receipts, typing indicators, presence, disappearing messages, reactions, reply threads, file attachments, and dark mode — all over WebSockets, backed by a clean relational schema.
+A full-stack, real-time messaging web application that faithfully mirrors the UI/UX of **Signal Desktop**. Sandesh delivers real-time 1:1 and group chats, delivery/read receipts, typing indicators, presence, disappearing messages, reactions, reply threads, file attachments, and dark mode — all over WebSockets, backed by a clean relational schema.
 
 > **"Say hello to a different messaging experience."**
 > Cryptography is simulated; the *experience* is the product.
