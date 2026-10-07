@@ -106,6 +106,11 @@ export function useSocketEvents() {
         useMessagesStore.getState().updateStatuses(data.conversation_id, data.message_ids, data.status);
       }),
 
+      /* --- reactions (emoji on a message) ------------------------------ */
+      socket.on<{ conversation_id: number; message: Message }>("message.reaction", ({ data }) => {
+        useMessagesStore.getState().updateMessage(data.message);
+      }),
+
       /* --- typing indicators -------------------------------------------- */
       socket.on<WsTyping>("typing", ({ data }) => {
         useMessagesStore.getState().setTyping(data.conversation_id, data.user_id, data.is_typing);

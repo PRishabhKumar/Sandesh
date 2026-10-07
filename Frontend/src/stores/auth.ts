@@ -49,6 +49,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     setToken(result.token);
     set({ user: result.user, ready: true });
     socket.connect();
+    // The verify-otp response doesn't include settings. Fetch them in the
+    // background so the Privacy / Appearance screens work immediately.
+    api.me().then((me) => set({ settings: me.settings })).catch(() => {});
   },
 
   setUser: (user) => set({ user }),
